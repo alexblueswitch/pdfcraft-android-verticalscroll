@@ -110,6 +110,17 @@ class ViewerGeometryTest {
     }
 
     @Test
+    fun aPinchEndingJustShortOfFitWidthSpringsBack() {
+        val s = state(List(3) { letter })
+        s.zoomTo(0.95f, Offset(540f, 700f))
+        assertEquals(ViewerState.MIN_ZOOM, s.pinchRest()!!, 0.0001f)
+        s.zoomTo(0.5f, Offset(540f, 700f))
+        assertEquals(null, s.pinchRest())
+        s.zoomTo(1.5f, Offset(540f, 700f))
+        assertEquals(null, s.pinchRest())
+    }
+
+    @Test
     fun zoomedOutPagesRenderAtHalfScale() {
         val s = state(List(20) { letter })
         val full = s.requests(1, 100f).first()

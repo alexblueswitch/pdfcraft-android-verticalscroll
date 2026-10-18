@@ -124,6 +124,7 @@ fun PageCanvas(
                     var zoomed = 1f
                     var started = false
                     var pinched = false
+                    var centroid = down.position
                     var lastChange: PointerInputChange = down
                     while (true) {
                         val event = awaitPointerEvent()
@@ -143,6 +144,7 @@ fun PageCanvas(
                             if (pressed.size > 1) {
                                 pinched = true
                                 val c = event.calculateCentroid()
+                                centroid = c
                                 if (zoomChange != 1f) state.zoomBy(zoomChange, c)
                             }
                             if (pan != Offset.Zero) state.scrollBy(pan.x, pan.y)
@@ -154,7 +156,15 @@ fun PageCanvas(
                     if (!started) return@awaitEachGesture
                     val v = tracker.calculateVelocity()
                     val velocity = if (pinched) Offset.Zero else Offset(v.x, v.y)
-                    flinger[0] = scope.launch { settle(state, velocity, density.density) }
+                    val rest = if (pinched) state.pinchRest() else null
+                    flinger[0] = scope.launch {
+                        if (rest != null) {
+                            val anim = Animatable(state.zoom)
+                            anim.animateTo(rest, tween(DOUBLE_TAP_MS)) { state.zoomTo(value, centroid) }
+                        } else {
+                            settle(state, velocity, density.density)
+                        }
+                    }
                 }
             },
     ) {

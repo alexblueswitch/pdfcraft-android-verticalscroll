@@ -59,6 +59,12 @@ class ViewerState(pages: List<PageSize>) {
     val minZoom: Float get() = if (mode == PageMode.Continuous) ZOOM_OUT_LIMIT else MIN_ZOOM
     val maxZoom: Float get() = MAX_ZOOM
 
+    /**
+     * Where a pinch that ended here comes to rest: fit-width when it stopped just short of it (a
+     * slight two-finger touch shouldn't leave thin margins at the sides), else where it is (null).
+     */
+    fun pinchRest(): Float? = if (mode == PageMode.Continuous && zoom >= SNAP_TO_FIT && zoom < MIN_ZOOM) MIN_ZOOM else null
+
     /** The page the reader is on: the one at the middle of the screen. */
     val currentPage: Int
         get() {
@@ -302,6 +308,9 @@ class ViewerState(pages: List<PageSize>) {
 
         /** How far continuous mode zooms out (a quarter of fit-width). */
         const val ZOOM_OUT_LIMIT = 0.25f
+
+        /** A pinch ending between this and fit-width springs back to fit-width. */
+        const val SNAP_TO_FIT = 0.9f
         const val LOWRES_BELOW = 0.6f
         const val LOWRES_LEVEL = -1
         const val MAX_ZOOM = 10f
