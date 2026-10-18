@@ -94,9 +94,17 @@ class DocumentFiles(private val context: Context) {
     /** Whether the app may write to [uri] (a document the user picked with write access). */
     fun canWrite(uri: Uri): Boolean {
         if (uri.scheme == ContentResolver.SCHEME_FILE) return uri.path?.let { File(it).canWrite() } == true
+        // a provider that says its document can't be written refuses whatever access the picker
+        // granted (Android's media documents, which the picker's Recent shows: "Media is read-only")
+        if (DocumentsContract.isDocumentUri(context, uri) && documentFlags(uri)?.let { it and DocumentsContract.Document.FLAG_SUPPORTS_WRITE == 0 } == true) return false
         val granted = resolver.persistedUriPermissions.any { it.uri == uri && it.isWritePermission }
         return granted || runCatching { resolver.openFileDescriptor(uri, "wa")?.close(); true }.getOrDefault(false)
     }
+
+    /** A document's flags (DocumentsContract.Document.FLAG_*), when its provider says. */
+    private fun documentFlags(uri: Uri): Int? = runCatching {
+        resolver.query(uri, arrayOf(DocumentsContract.Document.COLUMN_FLAGS), null, null, null)?.use { c -> if (c.moveToFirst() && !c.isNull(0)) c.getInt(0) else null }
+    }.getOrNull()
 
     /** Write [file] over [uri] (truncating it). */
     fun writeBack(file: File, uri: Uri) {

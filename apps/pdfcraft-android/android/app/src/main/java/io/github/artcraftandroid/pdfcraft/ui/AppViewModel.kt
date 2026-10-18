@@ -216,7 +216,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val eng = engine ?: return
         if (doc.controller.tool != ViewerTool.None) leaveTool(doc)
         viewModelScope.launch {
-            if (doc.info.dirty && !doc.writable) {
+            // changes the file's place can't take (known read-only, or found so now) are offered as a copy
+            if ((doc.info.dirty || doc.notWrittenBack) && (!doc.writable || !save(doc, quiet = true))) {
                 readOnlyPrompt = doc
                 return@launch
             }
@@ -291,26 +292,31 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     /**
      * Save [doc]'s changes: into its working file (incrementally, so earlier signatures stay
      * valid), then back over the file it came from when the app may write there. Returns
-     * whether the changes reached the original.
+     * whether the changes reached the original; [quiet] leaves a failure's message to the caller.
      */
-    suspend fun save(doc: OpenDocument): Boolean {
+    suspend fun save(doc: OpenDocument, quiet: Boolean = false): Boolean {
         val eng = engine ?: return false
-        if (!doc.info.dirty) return true
+        if (!doc.info.dirty && !doc.notWrittenBack) return true
         return try {
-            eng.tool("doc_save", mapOf("doc" to doc.id))
+            if (doc.info.dirty) eng.tool("doc_save", mapOf("doc" to doc.id))
             refresh(doc)
             val src = doc.source
             if (src != null && src.scheme == "content") {
-                if (!doc.writable) return false
+                if (!doc.writable) {
+                    doc.notWrittenBack = true
+                    return false
+                }
                 withContext(Dispatchers.IO) { files.writeBack(doc.file, src) }
             } else if (src != null && src.scheme == "file") {
                 val target = File(requireNotNull(src.path))
                 if (target.canonicalPath != doc.file.canonicalPath) withContext(Dispatchers.IO) { doc.file.copyTo(target, overwrite = true) }
             }
+            doc.notWrittenBack = false
             true
         } catch (e: Exception) {
             doc.writable = false
-            tell(e.userMessage)
+            doc.notWrittenBack = true
+            if (!quiet) tell(e.userMessage)
             false
         }
     }

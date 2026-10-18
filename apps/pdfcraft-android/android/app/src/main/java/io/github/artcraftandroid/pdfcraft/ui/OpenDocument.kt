@@ -49,6 +49,9 @@ class OpenDocument(
     /** Whether saving can write back to [source] (else changes need Save a copy). */
     var writable by mutableStateOf(true)
 
+    /** Changes saved into [file] that [source] doesn't have (it couldn't be written): closing offers a copy. */
+    var notWrittenBack = false
+
     /** The links of each page (0-based), refreshed when the document changes. */
     var links: Map<Int, List<io.github.artcraftandroid.pdfcraft.core.LinkInfo>> = emptyMap()
 
