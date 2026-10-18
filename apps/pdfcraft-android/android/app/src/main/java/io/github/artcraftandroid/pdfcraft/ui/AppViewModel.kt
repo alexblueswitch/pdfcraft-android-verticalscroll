@@ -1516,6 +1516,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     /** The pages scanned so far. */
     val scanPages = androidx.compose.runtime.mutableStateListOf<ScanPage>()
+
+    /** The scan's file name (without .pdf), set when its first page is taken and changeable before saving. */
+    var scanName by mutableStateOf("")
     private var shotFile: File? = null
     private var retakeIndex: Int? = null
 
@@ -1799,7 +1802,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             val r = retakeIndex
             retakeIndex = null
             if (r != null && r in scanPages.indices) scanPages[r] = page else scanPages.add(page)
+            if (scanName.isBlank()) scanName = "Scan " + java.text.SimpleDateFormat("yyyy-MM-dd HH.mm.ss", java.util.Locale.US).format(java.util.Date())
             if (toolScreen != ToolScreen.Scan) toolScreen = ToolScreen.Scan
+            // the document's edges in the photo, shown on the page and moved in Crop; the whole
+            // photo is kept when none are found
+            val found = engine?.let { eng -> runCatching { eng.tool("photo_find_document", mapOf("path" to f.absolutePath)) }.getOrNull() }
+                ?.takeIf { it.optBoolean("found") }?.optJSONArray("corners")?.takeIf { it.length() == 8 }
+                ?.let { a -> FloatArray(8) { a.optDouble(it).toFloat() } }
+            val at = scanPages.indexOfFirst { it.file == f }
+            if (found != null && at >= 0) scanPages[at] = scanPages[at].copy(corners = found, found = found)
         }
     }
 
@@ -1820,20 +1831,28 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun discardScan() {
         scanPages.forEach { it.file.delete() }
         scanPages.clear()
+        scanName = ""
         insertScanAt = null
         toolScreen = null
     }
 
     /** Save the scanned pages as a PDF with [filter]'s look (or insert them where Organize asked). */
     fun saveScan(filter: ScanFilter) = job("Saving scan…") { eng ->
-        val paths = scanPages.map { it.file.absolutePath }
+        val pages = scanPages.toList()
+        val paths = pages.map { it.file.absolutePath }
         val created = eng.tool("doc_create", mapOf("from" to "images", "paths" to paths, "name" to "Scan"))
         val id = created.optLong("doc")
         try {
-            // every page is straightened (Original keeps its look); pages whose edges can't be found keep the whole photo
-            for (p in 1..paths.size) {
-                busy = "Cleaning up page $p of ${paths.size}…"
-                runCatching { eng.tool("page_enhance_camera", mapOf("doc" to id, "page" to p, "mode" to filter.mode, "level" to filter.level)) }
+            // each page keeps the part inside its corners, straightened, with the look; a whole
+            // photo in Original stays as it was taken
+            val sizes = eng.tool("doc_info", mapOf("doc" to id)).optJSONArray("pages")
+            for ((i, page) in pages.withIndex()) {
+                if (page.corners.contentEquals(ScanPage.WHOLE) && filter == ScanFilter.Original) continue
+                val size = sizes?.optJSONObject(i) ?: continue
+                val (w, h) = size.optDouble("width") to size.optDouble("height")
+                val corners = page.corners.mapIndexed { k, v -> v * if (k % 2 == 0) w else h }
+                busy = "Cleaning up page ${i + 1} of ${pages.size}…"
+                runCatching { eng.tool("page_enhance_camera", mapOf("doc" to id, "page" to i + 1, "corners" to corners, "mode" to filter.mode, "level" to filter.level)) }
             }
             // the scan's words become text, searchable and selectable, when text recognition is installed
             withContext(Dispatchers.IO) { runCatching { eng.prepareOcrModels(getApplication()) } }
@@ -1845,14 +1864,16 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             eng.tool("doc_save", mapOf("doc" to id, "path" to out.absolutePath, "full" to true))
             val target = insertScanAt
             insertScanAt = null
+            val chosen = scanName.trim()
             scanPages.forEach { it.file.delete() }
             scanPages.clear()
+            scanName = ""
             toolScreen = null
             if (target != null) {
                 runTool(target.first, "page_insert_file", mapOf("path" to out.absolutePath, "at" to target.second))
             } else {
                 val stamp = java.text.SimpleDateFormat("yyyy-MM-dd HH.mm.ss", java.util.Locale.US).format(java.util.Date())
-                val name = "Scan $stamp.pdf"
+                val name = DocumentFiles.safeName(chosen.ifEmpty { "Scan $stamp" })
                 val uri = withContext(Dispatchers.IO) { files.saveToDownloads(out, name).also { out.delete() } }
                 tell("Saved as $name in Downloads")
                 open(uri)

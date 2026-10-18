@@ -243,6 +243,17 @@ impl Automation {
                 out["detected"] = json!(given.is_none());
                 out
             }
+            "photo_find_document" => {
+                let path = self.resolve(a.str("path")?, false)?;
+                let bytes = std::fs::read(&path).map_err(|e| failed(format!("{}: {e}", path.display())))?;
+                match pdfcraft_engine::camera::find_document_in_photo(&bytes) {
+                    Some(q) => {
+                        let r = |v: f64| (v * 10_000.0).round() / 10_000.0;
+                        json!({ "found": true, "corners": q.iter().flat_map(|&[x, y]| [r(x), r(y)]).collect::<Vec<f64>>() })
+                    }
+                    None => json!({ "found": false }),
+                }
+            }
             "page_delete" => {
                 let pages = self.pages(&a, "pages")?;
                 self.apply(&a, Edit::DeletePages { pages })?

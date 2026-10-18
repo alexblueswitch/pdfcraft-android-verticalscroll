@@ -3584,12 +3584,21 @@ impl Session {
 
     /// A new document with one page per image (PNG, JPEG).
     pub fn create_from_images(&self, images: &[(String, Vec<u8>)]) -> Result<Arc<Vec<u8>>, EditError> {
-        self.write_new(&pdfcraft_create::from_images(images)?)
+        self.create_from_images_with_resolution(images, ImageResolution::Embedded)
     }
 
-    /// Create image pages at embedded resolution or a fixed dpi, without resampling.
+    /// Create image pages at embedded resolution or a fixed dpi, without resampling. A phone
+    /// photo stored sideways (EXIF Orientation) becomes a page the way it was taken: a portrait
+    /// sheet makes a portrait page.
     pub fn create_from_images_with_resolution(&self, images: &[(String, Vec<u8>)], resolution: ImageResolution) -> Result<Arc<Vec<u8>>, EditError> {
-        self.write_new(&pdfcraft_create::from_images_with_resolution(images, resolution)?)
+        let upright: Vec<(String, Vec<u8>)> = images
+            .iter()
+            .map(|(name, bytes)| match upright_image::upright(bytes) {
+                std::borrow::Cow::Owned(turned) => (name.clone(), turned),
+                std::borrow::Cow::Borrowed(_) => (name.clone(), bytes.clone()),
+            })
+            .collect();
+        self.write_new(&pdfcraft_create::from_images_with_resolution(&upright, resolution)?)
     }
 
     /// A new document from plain text (US Letter, 11 pt Helvetica). Text Helvetica can't draw is

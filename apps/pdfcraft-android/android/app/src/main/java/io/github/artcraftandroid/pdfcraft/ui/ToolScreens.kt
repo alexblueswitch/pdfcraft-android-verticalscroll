@@ -64,6 +64,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
@@ -645,8 +646,16 @@ fun CropScreen(vm: AppViewModel, doc: OpenDocument) {
 }
 
 
-/** A scanned page: the photo's file and its thumbnail. */
-data class ScanPage(val file: java.io.File, val thumb: ImageBitmap)
+/**
+ * A scanned page: the photo's file, its thumbnail (as taken) and the part of it kept: [corners]
+ * as shares of the photo's width and height (x1, y1 … x4, y4 from the top left, clockwise), the
+ * whole photo when No crop was chosen or no edges were found. [found] is what Auto-detect found.
+ */
+data class ScanPage(val file: java.io.File, val thumb: ImageBitmap, val corners: FloatArray = WHOLE, val found: FloatArray? = null) {
+    companion object {
+        val WHOLE = floatArrayOf(0f, 0f, 1f, 0f, 1f, 1f, 0f, 1f)
+    }
+}
 
 /** The looks a scan can have, and how the engine's camera clean-up gives each. */
 enum class ScanFilter(val label: String, val mode: String, val level: Int) {
@@ -657,23 +666,49 @@ enum class ScanFilter(val label: String, val mode: String, val level: Int) {
     LightText("Light text", "bw", 60),
 }
 
-/** Scan: pages taken with the camera, reviewed (retake, delete, look), then saved as a PDF. */
+/** Scan: pages taken with the camera, reviewed (name, retake, crop, delete, look), then saved as a PDF. */
 @Composable
 fun ScanScreen(vm: AppViewModel) {
     val c = pdfColors
     val pages = vm.scanPages
     var filter by remember { mutableStateOf(ScanFilter.AutoColor) }
     var current by remember { mutableStateOf(0) }
+    var cropping by remember { mutableStateOf<java.io.File?>(null) }
+    var naming by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { if (pages.isEmpty()) vm.takeScanPhoto() }
+    // a page just taken is the one shown
+    var seen by remember { mutableStateOf(pages.size) }
+    LaunchedEffect(pages.size) {
+        if (pages.size > seen) current = pages.lastIndex
+        seen = pages.size
+    }
+    val croppingAt = pages.indexOfFirst { it.file == cropping }
+    if (croppingAt >= 0) {
+        ScanCrop(pages[croppingAt], onDone = { pages[croppingAt] = pages[croppingAt].copy(corners = it); cropping = null }, onCancel = { cropping = null })
+        return
+    }
     ToolScaffold(
         if (pages.isEmpty()) "Scan" else "Page ${current.coerceAtMost(pages.lastIndex) + 1} of ${pages.size}",
         { vm.discardScan() },
         "Save PDF", pages.isNotEmpty(), { vm.saveScan(filter) },
     ) {
+        // the new file's name, changeable before it's saved (not when the pages go into an open document)
+        if (vm.insertScanAt == null && vm.scanName.isNotBlank()) {
+            Row(
+                Modifier.fillMaxWidth().clickable { naming = true }.padding(horizontal = 16.dp, vertical = 10.dp).semantics { contentDescription = "File name: ${vm.scanName}. Change" },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(LucideIcons.FileText, null, tint = c.icon, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(12.dp))
+                Text(vm.scanName, color = c.text, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                Spacer(Modifier.width(12.dp))
+                Icon(LucideIcons.Pencil, null, tint = c.icon, modifier = Modifier.size(20.dp))
+            }
+        }
         Box(Modifier.weight(1f).fillMaxWidth().background(c.desk), contentAlignment = Alignment.Center) {
             val page = pages.getOrNull(current.coerceAtMost(pages.lastIndex))
             if (page != null) {
-                Image(page.thumb, null, modifier = Modifier.fillMaxSize().padding(16.dp), contentScale = ContentScale.Fit)
+                ScanPhoto(page.thumb, page.corners, Modifier.fillMaxSize())
             } else {
                 Text("Take a photo of each page", color = c.textSecondary)
             }
@@ -696,7 +731,106 @@ fun ScanScreen(vm: AppViewModel) {
         }
         Row(Modifier.fillMaxWidth().padding(8.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
             TextButton(onClick = { vm.retakeScan(current) }, enabled = pages.isNotEmpty()) { Text("Retake", color = c.accent) }
+            TextButton(onClick = { cropping = pages.getOrNull(current.coerceAtMost(pages.lastIndex))?.file }, enabled = pages.isNotEmpty()) { Text("Crop", color = c.accent) }
             TextButton(onClick = { if (pages.isNotEmpty()) { pages.removeAt(current.coerceAtMost(pages.lastIndex)); current = (current - 1).coerceAtLeast(0) } }, enabled = pages.isNotEmpty()) { Text("Delete", color = c.accent) }
+        }
+    }
+    if (naming) {
+        var name by remember { mutableStateOf(vm.scanName) }
+        PdfDialog(
+            onDismiss = { naming = false }, title = "File name",
+            confirm = "OK", confirmEnabled = name.isNotBlank(), onConfirm = { vm.scanName = name.trim(); naming = false },
+        ) {
+            PdfField(name, { name = it }, "File name")
+        }
+    }
+}
+
+/**
+ * Crop one scanned page: drag the corners onto the document's, or take what Auto-detect found,
+ * or the whole photo (No crop).
+ */
+@Composable
+private fun ScanCrop(page: ScanPage, onDone: (FloatArray) -> Unit, onCancel: () -> Unit) {
+    val c = pdfColors
+    var corners by remember(page.file) { mutableStateOf(page.corners) }
+    ToolScaffold("Crop", onCancel, "Done", true, { onDone(corners) }) {
+        Box(Modifier.weight(1f).fillMaxWidth().background(c.desk)) {
+            ScanPhoto(page.thumb, corners, Modifier.fillMaxSize(), onMove = { corners = it })
+        }
+        Row(Modifier.fillMaxWidth().padding(8.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
+            TextButton(onClick = { page.found?.let { corners = it } }, enabled = page.found != null) { Text("Auto-detect", color = if (page.found != null) c.accent else c.textSecondary) }
+            TextButton(onClick = { corners = ScanPage.WHOLE }) { Text("No crop", color = c.accent) }
+        }
+    }
+}
+
+/** Whether [q] (x1, y1 … x4, y4) is a convex quadrilateral, its corners going round one way. */
+private fun convexQuad(q: FloatArray): Boolean {
+    var sign = 0
+    for (i in 0 until 4) {
+        val (ax, ay) = q[2 * i] to q[2 * i + 1]
+        val (bx, by) = q[2 * ((i + 1) % 4)] to q[2 * ((i + 1) % 4) + 1]
+        val (cx, cy) = q[2 * ((i + 2) % 4)] to q[2 * ((i + 2) % 4) + 1]
+        val cross = (bx - ax) * (cy - by) - (by - ay) * (cx - bx)
+        val s = if (cross > 1e-6f) 1 else if (cross < -1e-6f) -1 else return false
+        if (sign != 0 && s != sign) return false
+        sign = s
+    }
+    return true
+}
+
+/**
+ * A scanned page's photo, fitted, with the part kept outlined and the rest dimmed: [corners] as
+ * shares of the photo. With [onMove], each corner has a handle to drag (the shape stays a convex
+ * four-sided one, as straightening needs).
+ */
+@Composable
+private fun ScanPhoto(thumb: ImageBitmap, corners: FloatArray, modifier: Modifier = Modifier, onMove: ((FloatArray) -> Unit)? = null) {
+    val c = pdfColors
+    val density = LocalDensity.current
+    BoxWithConstraints(modifier) {
+        // room around the photo for the handles
+        val pad = with(density) { (if (onMove != null) 24.dp else 16.dp).toPx() }
+        val k = minOf((constraints.maxWidth - 2 * pad) / thumb.width, (constraints.maxHeight - 2 * pad) / thumb.height).coerceAtLeast(0.01f)
+        val (iw, ih) = thumb.width * k to thumb.height * k
+        val origin = Offset((constraints.maxWidth - iw) / 2f, (constraints.maxHeight - ih) / 2f)
+        val latest = androidx.compose.runtime.rememberUpdatedState(corners)
+        val point = { q: FloatArray, i: Int -> Offset(origin.x + q[2 * i] * iw, origin.y + q[2 * i + 1] * ih) }
+        val drag = if (onMove == null) Modifier else Modifier.pointerInput(thumb, iw, ih) {
+            var held = -1
+            detectDragGestures(
+                onDragStart = { p ->
+                    val q = latest.value
+                    held = (0..3).minByOrNull { (point(q, it) - p).getDistance() }?.takeIf { (point(q, it) - p).getDistance() < 48.dp.toPx() } ?: -1
+                },
+                onDragEnd = { held = -1 },
+                onDragCancel = { held = -1 },
+            ) { change, d ->
+                if (held < 0) return@detectDragGestures
+                change.consume()
+                val q = latest.value.copyOf()
+                q[2 * held] = (q[2 * held] + d.x / iw).coerceIn(0f, 1f)
+                q[2 * held + 1] = (q[2 * held + 1] + d.y / ih).coerceIn(0f, 1f)
+                if (convexQuad(q)) onMove(q)
+            }
+        }
+        androidx.compose.foundation.Canvas(Modifier.fillMaxSize().then(drag)) {
+            drawImage(thumb, dstOffset = IntOffset(origin.x.roundToInt(), origin.y.roundToInt()), dstSize = androidx.compose.ui.unit.IntSize(iw.roundToInt().coerceAtLeast(1), ih.roundToInt().coerceAtLeast(1)))
+            val quad = androidx.compose.ui.graphics.Path().apply {
+                (0..3).forEach { i -> point(corners, i).let { if (i == 0) moveTo(it.x, it.y) else lineTo(it.x, it.y) } }
+                close()
+            }
+            clipPath(quad, androidx.compose.ui.graphics.ClipOp.Difference) {
+                drawRect(Color.Black.copy(alpha = 0.5f), origin, Size(iw, ih))
+            }
+            drawPath(quad, c.accent, style = Stroke(2.dp.toPx()))
+            if (onMove != null) {
+                for (i in 0..3) {
+                    drawCircle(Color.White, 11.dp.toPx(), point(corners, i))
+                    drawCircle(c.accent, 11.dp.toPx(), point(corners, i), style = Stroke(2.5.dp.toPx()))
+                }
+            }
         }
     }
 }

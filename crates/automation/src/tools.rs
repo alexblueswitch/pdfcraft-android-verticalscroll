@@ -198,6 +198,9 @@ pub fn tools() -> Vec<ToolDef> {
                 }),
                 &["doc", "page"],
             )),
+        t("photo_find_document", "Find a document in a photo", "Scan: the corners of the document (a sheet, a card, a receipt) in the photo at path (JPEG or PNG), before it becomes a page, so they can be shown and adjusted: corners [x1, y1, … x4, y4] as shares (0–1) of the photo's width and height the way it was taken (its EXIF orientation applied), top-left, top-right, bottom-right, bottom-left. found is false when no document's edges convince.")
+            .ro()
+            .with(schema(json!({ "path": { "type": "string" } }), &["path"])),
         t("page_delete", "Delete pages", "Delete pages. Undoable until saved.")
             .destructive()
             .cmd("page.delete")
