@@ -45,6 +45,7 @@ Then open `apps/pdfcraft-android/android` in Android Studio and press Run, or fr
 cd apps/pdfcraft-android/android
 ./gradlew installRelease                                # phone (arm64) and emulator (x86_64) libraries
 ./gradlew installRelease -Ppdfcraft.abis=arm64-v8a      # just the phone's: half the Rust build time
+./gradlew installRelease -Ppdfcraft.abis=armeabi-v7a    # a 32-bit ARM phone
 ```
 
 In PowerShell, quote the property: `.\gradlew.bat installRelease "-Ppdfcraft.abis=arm64-v8a"`.
