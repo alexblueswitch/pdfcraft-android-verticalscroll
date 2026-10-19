@@ -188,8 +188,10 @@ fun FieldTopBar(actions: FieldActions) {
 
 /** Every fillable field tinted light blue on the page, as the reference marks them. */
 fun androidx.compose.ui.graphics.drawscope.DrawScope.drawFieldTints(doc: OpenDocument) {
+    // a signed signature field is done: no tint over the signature
+    val signed = doc.signatures.filter { it.signed }.mapTo(HashSet()) { it.field }
     for (w in doc.widgets) {
-        if (w.readOnly || w.rect.size < 4 || w.kind == "button") continue
+        if (w.readOnly || w.rect.size < 4 || w.kind == "button" || (w.kind == "signature" && w.field in signed)) continue
         val page = w.page.toInt()
         val a = doc.viewer.pageToScreen(page, w.rect[0], w.rect[1])
         val b = doc.viewer.pageToScreen(page, w.rect[2], w.rect[3])

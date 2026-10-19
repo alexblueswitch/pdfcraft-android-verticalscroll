@@ -33,6 +33,12 @@ class PdfDateTest {
     }
 
     @Test
+    fun aCertificateDateShowsInLocalTime() {
+        // the engine writes certificate validity as "2031.10.19 13:59:58 UTC"
+        assertEquals(label(2031, 10, 19, 7, 59), pdfDateLabel("2031.10.19 13:59:58 UTC"))
+    }
+
+    @Test
     fun aUtcDateShowsInLocalTime() {
         // 03:28 UTC on the 12th is 21:28 on the 11th six hours west
         assertEquals(label(2026, 10, 11, 21, 28), pdfDateLabel("D:20261012032800Z"))

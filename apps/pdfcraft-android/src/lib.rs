@@ -166,6 +166,53 @@ pub fn file_thumbnail(path: String, max_side: u32) -> Result<RenderedImage, Mobi
     Ok(RenderedImage { width: out.width, height: out.height, rgba: out.rgba.to_vec() })
 }
 
+/// A digital ID file's certificate, as the app lists the IDs it can sign with.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct DigitalIdInfo {
+    /// Whose it is (the certificate's common name, else its whole subject).
+    pub name: String,
+    pub issuer: String,
+    pub email: Option<String>,
+    /// When it starts and stops being valid (seconds since 1970).
+    pub valid_from: i64,
+    pub valid_to: i64,
+    pub self_signed: bool,
+    /// The certificate's SHA-256 fingerprint (hex), which tells IDs apart.
+    pub sha256: String,
+    /// Why it can't sign documents, if it can't (its key usage doesn't allow it).
+    pub problem: Option<String>,
+}
+
+/// The largest digital ID file read: real ones are a few kilobytes.
+const MAX_ID_FILE: u64 = 1 << 20;
+
+/// What the digital ID file (.p12 / .pfx) at absolute path `path` holds, unlocked with
+/// `password`: a wrong password is [`MobileError::WrongPassword`].
+#[uniffi::export]
+pub fn digital_id_info(path: String, password: String) -> Result<DigitalIdInfo, MobileError> {
+    use pdfcraft_engine::sign::{SignError, pkcs12};
+    let size = std::fs::metadata(&path).map_err(|e| MobileError::Command(format!("{path}: {e}")))?.len();
+    if size > MAX_ID_FILE {
+        return Err(MobileError::Command("this is not a digital ID file (it is too large)".into()));
+    }
+    let bytes = std::fs::read(&path).map_err(|e| MobileError::Command(format!("{path}: {e}")))?;
+    let id = pkcs12::open(&bytes, &password).map_err(|e| match e {
+        SignError::WrongPassword => MobileError::WrongPassword,
+        e => MobileError::Command(e.to_string()),
+    })?;
+    let c = &id.certificate;
+    Ok(DigitalIdInfo {
+        name: c.display_name(),
+        issuer: c.issuer.display(),
+        email: c.subject.email().map(str::to_string),
+        valid_from: c.not_before.unix(),
+        valid_to: c.not_after.unix(),
+        self_signed: c.is_self_signed(),
+        sha256: c.fingerprint(),
+        problem: c.signing_problem().map(|d| d.message),
+    })
+}
+
 /// The engine version (`0.6.0`).
 #[uniffi::export]
 pub fn engine_version() -> String {
@@ -675,6 +722,12 @@ impl MobileSession {
         let (bytes, password) = self.with_doc(doc, |d| (d.bytes.clone(), d.password.clone()))?;
         let wav = pdfcraft_render::sound_wav(&bytes, password.as_deref(), page as usize, index as usize).map_err(MobileError::Command)?;
         std::fs::write(&path, wav).map_err(|e| MobileError::Command(format!("{path}: {e}")))
+    }
+
+    /// The certificate (DER) that signed signature field `field`, if it is signed: what the app
+    /// saves when the reader chooses to trust that signer.
+    pub fn signer_certificate(&self, doc: u64, field: String) -> Result<Option<Vec<u8>>, MobileError> {
+        self.with_doc(doc, |d| d.signatures.iter().find(|s| s.signed && s.field == field).and_then(|s| s.certificate.as_ref()).map(|c| c.raw.clone()))
     }
 
     /// Every visible widget of the document's form fields, page by page.

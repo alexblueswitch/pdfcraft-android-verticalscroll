@@ -102,7 +102,7 @@ fun ToolLayer(vm: AppViewModel, doc: OpenDocument) {
             if (doc.controller.commentMode == CommentMode.Voice) vm.startVoice(doc, p) else vm.notePrompt = NotePrompt(doc, p)
         }
         ViewerTool.Text -> TapLayer(doc) { p -> vm.textPrompt = TextPrompt(doc, p) }
-        ViewerTool.FillSign -> FillSignLayer(vm, doc)
+        ViewerTool.FillSign -> if (vm.certPlacing === doc) CertPlaceLayer(vm, doc) else FillSignLayer(vm, doc)
         else -> Unit
     }
 }

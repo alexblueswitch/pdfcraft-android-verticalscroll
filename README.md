@@ -208,6 +208,7 @@ PdfCraft for Android is in beta.
 | Read aloud with the phone's voice, the words marked as they're read, and a full player | ✅ |
 | Comments: notes, voice comments, highlight, underline, strikethrough, drawing (snap to shape), text; the Comment List and threads | ✅ |
 | Forms, and Fill & Sign: text, marks and a drawn or imported signature | ✅ |
+| Digital signatures: sign with a digital ID (a .p12 / .pfx file, or one made in the app), check a document's signatures, trust signers | ✅ |
 | Edit PDF: edit text, add text and images, move, resize and turn pictures | ✅ · cropping a picture ⬜ |
 | Organize and crop pages | ✅ |
 | Compress, combine, set password, create PDF (images, text, office documents), scan | ✅ |

@@ -364,3 +364,50 @@ fn reading_blocks_split_paragraphs_and_map_characters_to_glyphs() {
     let range = TextRange { page: 0, start: second.glyph_of_char[0], end: second.glyph_of_char[5] + 1 };
     assert_eq!(s.text_of(doc, range).unwrap(), "Second");
 }
+
+#[test]
+fn signs_with_a_digital_id_and_trusts_its_signer() {
+    let s = MobileSession::new();
+    let dir = scratch();
+    let id = dir.join("me.p12").to_string_lossy().into_owned();
+    let made = json!({ "name": "Test Signer", "email": "signer@example.com", "password": "secret1", "path": id });
+    s.execute("sign_id_create".into(), made.to_string()).unwrap();
+    // the file's certificate, and a wrong password told apart
+    let info = digital_id_info(id.clone(), "secret1".into()).unwrap();
+    assert_eq!(info.name, "Test Signer");
+    assert_eq!(info.email.as_deref(), Some("signer@example.com"));
+    assert!(info.self_signed && info.valid_to > info.valid_from && info.problem.is_none());
+    assert_eq!(info.sha256.replace(' ', "").len(), 64);
+    assert!(matches!(digital_id_info(id.clone(), "wrong".into()), Err(MobileError::WrongPassword)));
+    let junk = dir.join("junk.p12");
+    std::fs::write(&junk, b"not a digital id").unwrap();
+    assert!(matches!(digital_id_info(junk.to_string_lossy().into_owned(), "x".into()), Err(MobileError::Command(_))));
+
+    // signing writes the signed file over the working copy the document was opened from
+    let path = blank_pdf(1);
+    let doc = s.open(path.clone(), None).unwrap().id;
+    assert!(s.signer_certificate(doc, "Signature1".into()).unwrap().is_none());
+    let args =
+        json!({ "doc": doc, "id": id, "password": "secret1", "page": 1, "rect": [72, 72, 252, 122], "graphic": { "text": "Test" }, "out": path });
+    let out: Value = serde_json::from_str(&s.execute("sign_document".into(), args.to_string()).unwrap()).unwrap();
+    let field = out["signature"]["field"].as_str().unwrap().to_string();
+    assert_eq!(out["signature"]["status"], "unknown");
+    let info = s.document(doc).unwrap();
+    assert!(info.signed && !info.dirty && info.undo.is_none());
+    assert_eq!(std::fs::read(&path).unwrap().len() as u64, out["bytes"].as_u64().unwrap());
+
+    // trusting the signer's certificate makes the signature valid
+    let cert = s.signer_certificate(doc, field).unwrap().unwrap();
+    let cer = dir.join("signer.cer");
+    std::fs::write(&cer, &cert).unwrap();
+    s.execute("sign_trust".into(), json!({ "paths": [cer.to_string_lossy()] }).to_string()).unwrap();
+    let list: Value = serde_json::from_str(&s.execute("sign_list".into(), json!({ "doc": doc }).to_string()).unwrap()).unwrap();
+    assert_eq!(list["all_valid"], true);
+
+    // an edit after signing is saved incrementally: the signature stays valid
+    s.execute("comment_add".into(), json!({ "doc": doc, "page": 1, "type": "note", "at": [300, 300], "contents": "after" }).to_string()).unwrap();
+    s.execute("doc_save".into(), json!({ "doc": doc }).to_string()).unwrap();
+    let list: Value = serde_json::from_str(&s.execute("sign_list".into(), json!({ "doc": doc }).to_string()).unwrap()).unwrap();
+    assert_eq!(list["signatures"][0]["status"], "valid");
+    assert_eq!(list["signatures"][0]["modification"], "allowed");
+}

@@ -58,6 +58,9 @@ class OpenDocument(
     /** The comments, refreshed when the document changes (tapping one selects it). */
     var comments: List<io.github.artcraftandroid.pdfcraft.core.CommentInfo> = emptyList()
 
+    /** Its signatures and signature fields with what validating them found, refreshed when the document changes. */
+    var signatures by mutableStateOf<List<io.github.artcraftandroid.pdfcraft.ui.viewer.SignatureEntry>>(emptyList())
+
     /** The form fields' widgets, refreshed when the document changes. */
     var widgets: List<io.github.artcraftandroid.pdfcraft.core.WidgetInfo> = emptyList()
 

@@ -58,6 +58,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.artcraftandroid.pdfcraft.ui.home.HomeRoot
 import io.github.artcraftandroid.pdfcraft.ui.home.SettingsScreen
+import io.github.artcraftandroid.pdfcraft.ui.viewer.CertSignScreen
+import io.github.artcraftandroid.pdfcraft.ui.viewer.CreateIdScreen
+import io.github.artcraftandroid.pdfcraft.ui.viewer.IdPasswordDialog
+import io.github.artcraftandroid.pdfcraft.ui.viewer.SignFieldChoiceDialog
 import io.github.artcraftandroid.pdfcraft.ui.viewer.SignaturePadScreen
 import io.github.artcraftandroid.pdfcraft.ui.viewer.ViewerScreen
 
@@ -104,6 +108,8 @@ fun AppRoot(vm: AppViewModel, onBrowse: () -> Unit, onPickSignatureImage: () -> 
         if (doc == null) vm.fileSheet?.let { (r, recent) -> io.github.artcraftandroid.pdfcraft.ui.home.FileSheet(vm, r, recent) { vm.fileSheet = null } }
         vm.toolScreen?.let { ToolScreenHost(vm, it) }
         vm.signaturePad?.let { SignaturePadScreen(vm, it, onPickSignatureImage) }
+        vm.certSign?.let { CertSignScreen(vm, it) }
+        if (vm.idCreate) CreateIdScreen(vm)
         if (vm.settingsOpen) SettingsScreen(vm)
         if (vm.showLicences) LicencesScreen(vm)
 
@@ -111,6 +117,8 @@ fun AppRoot(vm: AppViewModel, onBrowse: () -> Unit, onPickSignatureImage: () -> 
         SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 72.dp, start = 8.dp, end = 8.dp))
 
         vm.passwordRequest?.let { PasswordDialog(vm, it) }
+        vm.idImport?.let { IdPasswordDialog(vm, it) }
+        vm.signFieldChoice?.let { (d, w) -> SignFieldChoiceDialog(vm, d, w) }
         if (vm.authorPrompt) {
             var name by remember { mutableStateOf("") }
             PdfDialog(

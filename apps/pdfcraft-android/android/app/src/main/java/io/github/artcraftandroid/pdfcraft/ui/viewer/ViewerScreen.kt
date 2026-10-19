@@ -395,6 +395,7 @@ fun ViewerScreen(vm: AppViewModel, doc: OpenDocument) {
                 ViewerSheet.Attachments -> AttachmentsSheet(vm, doc)
                 ViewerSheet.Comments -> Unit
                 ViewerSheet.MoreTools -> MoreToolsSheet(vm, doc)
+                ViewerSheet.Signatures -> SignaturesSheet(vm, doc)
                 ViewerSheet.None -> Unit
             }
         }

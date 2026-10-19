@@ -90,6 +90,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             application.engine.await().onSuccess { engine = it }.onFailure { engineProblem = it.userMessage }
             refreshRecents()
+            // the signers the reader trusts, before any signature is checked
+            // (a document opened from another app meanwhile is checked again)
+            engine?.let { eng ->
+                if (withContext(Dispatchers.IO) { trustedCerts.files().isNotEmpty() }) {
+                    runCatching { applyTrust(eng) }
+                    document?.let { loadSignatures(eng, it) }
+                }
+            }
         }
     }
 
@@ -178,6 +186,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             // a file left in Reading Mode reopens in it, unless it was opened for a tool
             readingMode = recent?.reading == true && pendingTool == null
             document = doc
+            if (doc.info.signed) announceSignatures(doc)
             startPendingTool(doc)
             pendingPage = recent?.lastPage?.takeIf { it in 0 until info.pages.size }
             pendingSpot = recent?.takeIf { pendingPage != null && it.lastX >= 0f && it.lastY >= 0f }?.let { Triple(it.lastX, it.lastY, it.lastZoom) }
@@ -336,6 +345,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         doc.links = runCatching {
             eng.command { (0 until doc.info.pages.size).associateWith { p -> links(doc.id, p.toUInt()) } }
         }.getOrDefault(emptyMap())
+        loadSignatures(eng, doc)
     }
 
     /**
@@ -415,6 +425,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             editImage = null
             editMode = io.github.artcraftandroid.pdfcraft.ui.viewer.EditMode.Select
         }
+        if (certPlacing === doc) certPlacing = null
         doc.controller.tool = ViewerTool.None
     }
 
@@ -1142,6 +1153,257 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    // ---- Digital signatures: signing with a digital ID, and what a document's signatures say ----
+
+    /** The digital IDs the reader added or made (lazy: the engine's start may need them first). */
+    val digitalIds by lazy { io.github.artcraftandroid.pdfcraft.engine.DigitalIds(app.filesDir) }
+
+    /** The signers the reader chose to trust, given to the engine when it starts. */
+    val trustedCerts by lazy { io.github.artcraftandroid.pdfcraft.engine.TrustedCertificates(app.filesDir) }
+
+    /** The document a digital signature's box is being drawn on (Sign ▸ Sign with a digital ID). */
+    var certPlacing by mutableStateOf<OpenDocument?>(null)
+
+    /** Sign with a digital ID, open for where the signature goes. */
+    var certSign by mutableStateOf<io.github.artcraftandroid.pdfcraft.ui.viewer.CertTarget?>(null)
+
+    /** Why the last signing failed (a wrong password), shown on the Sign screen. */
+    var certSignError by mutableStateOf<String?>(null)
+
+    /** The digital ID chosen on the Sign screen. */
+    var chosenId by mutableStateOf<io.github.artcraftandroid.pdfcraft.engine.DigitalId?>(null)
+
+    /** A picked digital ID file, waiting for its password. */
+    var idImport by mutableStateOf<io.github.artcraftandroid.pdfcraft.ui.viewer.IdImport?>(null)
+        private set
+
+    /** Create a digital ID is open. */
+    var idCreate by mutableStateOf(false)
+
+    /** An empty signature field was tapped: draw a signature there, or sign it with a digital ID. */
+    var signFieldChoice by mutableStateOf<Pair<OpenDocument, io.github.artcraftandroid.pdfcraft.core.WidgetInfo>?>(null)
+
+    /** Draw the box for a new digital signature on [doc], in Fill & Sign. */
+    fun startCertPlacing(doc: OpenDocument) {
+        if (!doc.info.readOnlyReason.isNullOrEmpty()) {
+            tell("This document can't be changed, so it can't be signed.")
+            return
+        }
+        if (doc.controller.tool != ViewerTool.FillSign) enterTool(doc, ViewerTool.FillSign)
+        doc.controller.signPanel = false
+        selectedFill = null
+        certPlacing = doc
+    }
+
+    /** The box was drawn: on to choosing the ID. */
+    fun placeCert(doc: OpenDocument, page: Int, rect: FloatArray) {
+        certPlacing = null
+        openCertSign(io.github.artcraftandroid.pdfcraft.ui.viewer.CertTarget(doc, null, page, rect))
+    }
+
+    fun signFieldWithId(doc: OpenDocument, w: io.github.artcraftandroid.pdfcraft.core.WidgetInfo) {
+        openCertSign(io.github.artcraftandroid.pdfcraft.ui.viewer.CertTarget(doc, w.field, w.page.toInt(), null))
+    }
+
+    /** A drawn (Fill & Sign) signature in signature field [w], as a tap on it did before digital IDs. */
+    fun drawSignatureInField(doc: OpenDocument, w: io.github.artcraftandroid.pdfcraft.core.WidgetInfo) {
+        signaturePad = io.github.artcraftandroid.pdfcraft.ui.viewer.SignaturePad(false, doc, PagePoint(w.page.toInt(), (w.rect[0] + w.rect[2]) / 2f - 40f, (w.rect[1] + w.rect[3]) / 2f - 10f))
+    }
+
+    private fun openCertSign(t: io.github.artcraftandroid.pdfcraft.ui.viewer.CertTarget) {
+        certSignError = null
+        val ids = digitalIds.all
+        if (chosenId !in ids) chosenId = ids.lastOrNull()
+        certSign = t
+    }
+
+    fun pickDigitalId() = pickFiles(FilePickKind.DigitalId)
+
+    /** The digital ID file's password: add it (when the password opens it), or give up (null). */
+    fun answerIdImport(password: String?) {
+        val imp = idImport ?: return
+        idImport = null
+        if (password == null) {
+            imp.file.delete()
+            return
+        }
+        viewModelScope.launch {
+            try {
+                val info = withContext(Dispatchers.IO) { io.github.artcraftandroid.pdfcraft.core.digitalIdInfo(imp.file.absolutePath, password) }
+                val problem = info.problem
+                if (problem != null) {
+                    imp.file.delete()
+                    tell("This digital ID can't sign documents. $problem")
+                    return@launch
+                }
+                val id = withContext(Dispatchers.IO) { digitalIds.add(imp.file, info) }
+                imp.file.delete()
+                chosenId = id
+                tell("Added ${id.name}'s digital ID")
+            } catch (e: MobileException.WrongPassword) {
+                idImport = io.github.artcraftandroid.pdfcraft.ui.viewer.IdImport(imp.file, imp.name, wrong = true)
+            } catch (e: MobileException) {
+                imp.file.delete()
+                tell("PdfCraft can't use this file as a digital ID: ${e.userMessage}")
+            }
+        }
+    }
+
+    /** Make a self-signed digital ID (2048-bit RSA, valid 5 years) and choose it. */
+    fun createDigitalId(name: String, email: String, organization: String, password: String) {
+        val eng = engine ?: return
+        viewModelScope.launch {
+            busy = "Creating your digital ID…"
+            val tmp = File(getApplication<Application>().cacheDir, "new-id-${System.nanoTime()}.p12")
+            try {
+                eng.tool("sign_id_create", mapOf(
+                    "name" to name.trim(), "email" to email.trim().ifEmpty { null }, "organization" to organization.trim().ifEmpty { null },
+                    "password" to password, "path" to tmp.absolutePath,
+                ))
+                val info = withContext(Dispatchers.IO) { io.github.artcraftandroid.pdfcraft.core.digitalIdInfo(tmp.absolutePath, password) }
+                chosenId = withContext(Dispatchers.IO) { digitalIds.add(tmp, info) }
+                idCreate = false
+                tell("Digital ID created")
+            } catch (e: MobileException) {
+                tell(toolMessage(e, "sign_id_create"))
+            } finally {
+                tmp.delete()
+                busy = null
+            }
+        }
+    }
+
+    fun removeDigitalId(id: io.github.artcraftandroid.pdfcraft.engine.DigitalId) {
+        digitalIds.remove(id)
+        if (chosenId == id) chosenId = digitalIds.all.lastOrNull()
+    }
+
+    /**
+     * Sign [t]'s document with [id]: the engine signs it as it is now (with any changes not yet
+     * saved) and the signed file replaces the working copy, then goes back where it came from.
+     */
+    fun signWithId(
+        t: io.github.artcraftandroid.pdfcraft.ui.viewer.CertTarget,
+        id: io.github.artcraftandroid.pdfcraft.engine.DigitalId,
+        password: String,
+        look: io.github.artcraftandroid.pdfcraft.ui.viewer.CertLook,
+        reason: String,
+        location: String,
+    ) {
+        val eng = engine ?: return
+        val doc = t.doc
+        viewModelScope.launch {
+            busy = "Signing…"
+            try {
+                val args = mutableMapOf<String, Any?>(
+                    "doc" to doc.id, "id" to id.file.absolutePath, "password" to password, "out" to doc.file.absolutePath,
+                    "reason" to reason.trim().ifEmpty { null }, "location" to location.trim().ifEmpty { null },
+                )
+                if (t.field != null) {
+                    args["field"] = t.field
+                } else {
+                    args["page"] = t.page + 1
+                    args["rect"] = t.rect?.map { it.toDouble() }
+                }
+                when (look) {
+                    io.github.artcraftandroid.pdfcraft.ui.viewer.CertLook.Name -> Unit
+                    io.github.artcraftandroid.pdfcraft.ui.viewer.CertLook.Typed -> args["graphic"] = mapOf("text" to id.name)
+                    io.github.artcraftandroid.pdfcraft.ui.viewer.CertLook.Drawn -> args["graphic"] = mapOf("image" to signatures.signature.absolutePath)
+                }
+                eng.tool("sign_document", args)
+                certSign = null
+                certSignError = null
+                if (doc.controller.tool == ViewerTool.FillSign) leaveTool(doc)
+                refresh(doc)
+                // the working copy is signed; the original gets it now, or a copy does
+                doc.notWrittenBack = true
+                if (save(doc, quiet = true)) {
+                    tell("Signed and saved")
+                } else {
+                    tell("Signed, but ${doc.name} can't be changed where it is. Save a copy to keep the signed file.", "Save a copy") { saveCopyAs(doc) }
+                }
+            } catch (e: MobileException) {
+                val m = toolMessage(e, "sign_document")
+                certSignError = if (m.contains("password is incorrect", ignoreCase = true)) "The password is incorrect." else m
+            } finally {
+                busy = null
+            }
+        }
+    }
+
+    /** A tool's refusal without the tool's name in front, as a sentence. */
+    private fun toolMessage(e: Throwable, tool: String): String =
+        e.userMessage.removePrefix("$tool: ").replaceFirstChar { it.uppercase() }.let { if (it.endsWith(".")) it else "$it." }
+
+    /** What the document's signatures say (only asked for when it has signatures or signature fields). */
+    private suspend fun loadSignatures(eng: Engine, doc: OpenDocument) {
+        if (!doc.info.signed && doc.widgets.none { it.kind == "signature" }) {
+            doc.signatures = emptyList()
+            return
+        }
+        doc.signatures = runCatching { io.github.artcraftandroid.pdfcraft.ui.viewer.parseSignatures(eng.tool("sign_list", mapOf("doc" to doc.id))) }.getOrDefault(emptyList())
+    }
+
+    /** On opening a signed document: whether its signatures hold, with the details a tap away. */
+    private fun announceSignatures(doc: OpenDocument) {
+        val signed = doc.signatures.filter { it.signed }
+        if (signed.isEmpty()) return
+        val one = signed.singleOrNull()
+        val text = when {
+            signed.any { it.status == "invalid" } -> if (one != null) "This document's signature is invalid." else "At least one signature in this document is invalid."
+            signed.all { it.status == "valid" } -> if (one != null) "Signed by ${one.signer ?: "an unknown signer"}. The signature is valid." else "All ${signed.size} signatures are valid."
+            one != null -> "Signed by ${one.signer ?: "an unknown signer"}. The document hasn't changed since, but the signer isn't verified."
+            else -> "Signed. Some of the signers aren't verified."
+        }
+        tell(text, "Details") { doc.controller.sheet = io.github.artcraftandroid.pdfcraft.ui.viewer.ViewerSheet.Signatures }
+    }
+
+    /** Show signature [s] on its page, flashing its box. */
+    fun showSignature(doc: OpenDocument, s: io.github.artcraftandroid.pdfcraft.ui.viewer.SignatureEntry) {
+        val page = s.page ?: return
+        val rect = s.rect ?: return
+        doc.viewer.goToPage(page, (rect[1] - 60f).coerceAtLeast(0f))
+        viewModelScope.launch {
+            delay(250)
+            doc.linkFlash = LinkFlash(page, rect)
+            delay(600)
+            doc.linkFlash = null
+        }
+    }
+
+    /** Trust the certificate that made signature [s], on this device: signatures by it then validate. */
+    fun trustSigner(doc: OpenDocument, s: io.github.artcraftandroid.pdfcraft.ui.viewer.SignatureEntry) {
+        val eng = engine ?: return
+        val sha = s.cert?.sha256 ?: return
+        viewModelScope.launch {
+            try {
+                val der = eng.command { signerCertificate(doc.id, s.field) } ?: return@launch
+                withContext(Dispatchers.IO) { trustedCerts.add(der, sha) }
+                applyTrust(eng)
+                loadSignatures(eng, doc)
+                tell("${s.signer ?: "This signer"} is trusted on this device")
+            } catch (e: MobileException) {
+                tell(e.userMessage)
+            }
+        }
+    }
+
+    fun untrustSigner(doc: OpenDocument, s: io.github.artcraftandroid.pdfcraft.ui.viewer.SignatureEntry) {
+        val eng = engine ?: return
+        val sha = s.cert?.sha256 ?: return
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { trustedCerts.remove(sha) }
+            runCatching { applyTrust(eng) }
+            loadSignatures(eng, doc)
+        }
+    }
+
+    /** Give the engine the trusted signers' certificates (it revalidates open documents). */
+    private suspend fun applyTrust(eng: Engine) {
+        val paths = withContext(Dispatchers.IO) { trustedCerts.files().map { it.absolutePath } }
+        eng.tool("sign_trust", mapOf("clear" to true, "paths" to paths))
+    }
+
     // ---- Edit PDF ----------------------------------------------------------------------------
 
     var editMode by mutableStateOf(io.github.artcraftandroid.pdfcraft.ui.viewer.EditMode.Select)
@@ -1462,7 +1724,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             "checkbox" -> fillField(doc, w.field, !w.on)
             "radio" -> w.export?.let { fillField(doc, w.field, it) }
             "text", "combo", "list" -> fieldEdit = io.github.artcraftandroid.pdfcraft.ui.viewer.FieldEdit(doc, w)
-            "signature" -> signaturePad = io.github.artcraftandroid.pdfcraft.ui.viewer.SignaturePad(false, doc, PagePoint(at.page, (w.rect[0] + w.rect[2]) / 2f - 40f, (w.rect[1] + w.rect[3]) / 2f - 10f))
+            // a signed field shows its signature's details; an empty one, a drawn or a digital signature
+            "signature" -> if (doc.signatures.any { it.field == w.field && it.signed }) {
+                doc.controller.sheet = io.github.artcraftandroid.pdfcraft.ui.viewer.ViewerSheet.Signatures
+            } else {
+                signFieldChoice = doc to w
+            }
             "button" -> pressButton(doc, w)
             else -> return false
         }
@@ -1555,6 +1822,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }
             FilePickKind.Open -> open(uris.first())
+            FilePickKind.DigitalId -> viewModelScope.launch {
+                val uri = uris.first()
+                val picked = withContext(Dispatchers.IO) { runCatching { copyIn(uri) }.getOrNull() }
+                if (picked == null) tell("That file couldn't be read.")
+                else idImport = io.github.artcraftandroid.pdfcraft.ui.viewer.IdImport(picked, picked.name, wrong = false)
+            }
         }
     }
 

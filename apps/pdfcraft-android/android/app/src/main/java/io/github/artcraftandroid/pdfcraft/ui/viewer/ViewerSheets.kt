@@ -110,6 +110,7 @@ fun MoreSheet(vm: AppViewModel, doc: OpenDocument) {
             if (doc.info.attachments > 0u) SheetRow(LucideIcons.Paperclip, "Attachments", { ctl.sheet = ViewerSheet.Attachments }, chevron = true)
             SheetRow(LucideIcons.Bookmark, "Bookmarks & Table of Contents", { ctl.sheet = ViewerSheet.Bookmarks }, chevron = true)
             SheetRow(LucideIcons.MessagesSquare, "Comment List", { ctl.sheet = ViewerSheet.Comments }, chevron = true)
+            SheetRow(LucideIcons.ShieldCheck, "Signatures", { ctl.sheet = ViewerSheet.Signatures }, chevron = true)
             SheetRow(
                 if (bookmarked) LucideIcons.BookmarkMinus else LucideIcons.BookmarkPlus,
                 if (bookmarked) "Remove bookmark" else "Add bookmark",
@@ -379,16 +380,19 @@ fun pdfDateLabel(s: String?): String? {
     return DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(t))
 }
 
-/** The moment a PDF date names (`D:20261011171900Z`, `D:20261011171900-06'00'`, or the engine's `2026-10-11 17:19`). */
+/**
+ * The moment a PDF date names (`D:20261011171900Z`, `D:20261011171900-06'00'`, the engine's
+ * `2026-10-11 17:19`, or a certificate's `2031.10.19 13:59:58 UTC`).
+ */
 fun pdfDateMillis(s: String?): Long? {
     if (s == null) return null
-    val m = Regex("""(\d{4})[-/]?(\d{2})?[-/]?(\d{2})?[ T]?(\d{2})?:?(\d{2})?:?(\d{2})?(Z|[+-]\d{2}'?\d{2}'?)?""").find(s) ?: return null
+    val m = Regex("""(\d{4})[-/.]?(\d{2})?[-/.]?(\d{2})?[ T]?(\d{2})?:?(\d{2})?:?(\d{2})? ?(Z|UTC|[+-]\d{2}'?\d{2}'?)?""").find(s) ?: return null
     val g = m.groupValues
     // with a time zone the moment is exact and shows in the phone's local time; without one, as written
     val tz = g[7]
     val zone = when {
         tz.isEmpty() -> java.util.TimeZone.getDefault()
-        tz == "Z" -> java.util.TimeZone.getTimeZone("UTC")
+        tz == "Z" || tz == "UTC" -> java.util.TimeZone.getTimeZone("UTC")
         else -> java.util.TimeZone.getTimeZone("GMT" + tz.substring(0, 3) + ":" + tz.filter { it.isDigit() }.drop(2).padEnd(2, '0').take(2))
     }
     val cal = java.util.Calendar.getInstance(zone)
