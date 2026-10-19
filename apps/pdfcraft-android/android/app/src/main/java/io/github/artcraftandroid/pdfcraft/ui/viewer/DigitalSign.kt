@@ -311,6 +311,15 @@ fun CertSignScreen(vm: AppViewModel, target: CertTarget) {
     }
 }
 
+/**
+ * A certificate's name as a person reads it: its common name (`CN=`), else its organisation
+ * (`O=`), else the whole name ("CN=Example Root CA, O=Example" reads "Example Root CA").
+ */
+internal fun readableName(dn: String): String {
+    fun part(key: String) = Regex("""(?:^|,\s*)$key=([^,]+)""").find(dn)?.groupValues?.get(1)?.trim()?.takeIf { it.isNotEmpty() }
+    return part("CN") ?: part("O") ?: dn
+}
+
 /** Why [id] can't sign now, if it can't. */
 private fun idProblem(id: DigitalId): String? = when {
     id.expired() -> "This digital ID expired on ${shortDate(id.validTo * 1000)}."
@@ -356,7 +365,7 @@ private fun IdRow(vm: AppViewModel, id: DigitalId, selected: Boolean, onClick: (
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f).padding(vertical = 8.dp)) {
             Text(id.name, color = c.text, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            val by = if (id.selfSigned) "Self-signed" else "Issued by ${id.issuer}"
+            val by = if (id.selfSigned) "Self-signed" else "Issued by ${readableName(id.issuer)}"
             val until = idProblem(id) ?: "Valid until ${shortDate(id.validTo * 1000)}"
             Text("$by · $until", color = if (idProblem(id) != null) c.red else c.textSecondary, fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
@@ -517,7 +526,7 @@ private fun SignatureDetails(vm: AppViewModel, doc: OpenDocument, s: SignatureEn
             line("Reason", s.reason)
             line("Location", s.location)
             s.cert?.let { cert ->
-                line("Certificate", if (cert.selfSigned) "self-signed" else "issued by ${cert.issuer}")
+                line("Certificate", if (cert.selfSigned) "self-signed" else "issued by ${readableName(cert.issuer)}")
                 line("Valid until", pdfDateLabel(cert.validTo))
             }
             s.certify?.let {

@@ -1,7 +1,9 @@
 package io.github.artcraftandroid.pdfcraft.ui
 
 import io.github.artcraftandroid.pdfcraft.ui.viewer.fitSignatureBox
+import io.github.artcraftandroid.pdfcraft.ui.viewer.readableName
 import org.junit.Assert.assertArrayEquals
+import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class SignatureBoxTest {
@@ -27,5 +29,13 @@ class SignatureBoxTest {
         assertArrayEquals(floatArrayOf(432f, 738f, 612f, 792f), fitSignatureBox(null, 610f, 790f, 612f, 792f), 0.001f)
         // a page smaller than the usual box: the box is the page
         assertArrayEquals(floatArrayOf(0f, 0f, 100f, 40f), fitSignatureBox(null, 50f, 20f, 100f, 40f), 0.001f)
+    }
+
+    @Test
+    fun aCertificateNameReadsAsItsCommonName() {
+        assertEquals("PrintCraft Test Root CA", readableName("CN=PrintCraft Test Root CA, O=PrintCraft Tests"))
+        assertEquals("PrintCraft Tests", readableName("O=PrintCraft Tests, C=US"))
+        assertEquals("Somebody", readableName("C=US, CN=Somebody"))
+        assertEquals("unparsed", readableName("unparsed"))
     }
 }
