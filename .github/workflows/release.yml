@@ -10,10 +10,8 @@ name: Release
 
 on:
   push:
-    # Register and exercise this workflow in a new fork after updating this file.
-    # Normal code changes still use the manual Run workflow button.
+    # Build an installable APK whenever changes reach main.
     branches: [main]
-    paths: ['.github/workflows/release.yml']
     tags: ['v*']
   workflow_dispatch:
 
