@@ -18,7 +18,7 @@ enum class PageMode {
     /** One column, scrolled vertically; every page as wide as the widest fits the screen. */
     Continuous,
 
-    /** One page at a time, side by side, each fitted to the screen; swipes go page to page. */
+    /** One page at a time, stacked vertically; swipes move up or down between pages. */
     SinglePage,
 }
 
@@ -29,7 +29,7 @@ enum class PageMode {
  * Continuous: the pages stack in one column with [gap] between them, scaled together so the
  * widest fills the width less [margin] on each side; [padTop] and [padBottom] keep the first and
  * last pages clear of the bars. SinglePage: each page is fitted into the viewport (less the
- * margins and paddings) and centred in a slot one viewport wide.
+ * margins and paddings) and centred in a slot one viewport tall.
  */
 class DocLayout(
     val pages: List<PageSize>,
@@ -69,12 +69,12 @@ class DocLayout(
                     val s = min(availW / p.width.coerceAtLeast(1f), availH / p.height.coerceAtLeast(1f))
                     val w = p.width.coerceAtLeast(1f) * s
                     val h = p.height.coerceAtLeast(1f) * s
-                    val x = i * viewW + (viewW - w) / 2f
-                    val y = padTop + margin + (availH - h) / 2f
+                    val x = (viewW - w) / 2f
+                    val y = i * viewH + padTop + margin + (availH - h) / 2f
                     out.add(LRect(x, y, x + w, y + h))
                 }
-                width = max(viewW, pages.size * viewW)
-                height = viewH
+                width = viewW
+                height = max(viewH, pages.size * viewH)
             }
         }
         rects = out
@@ -94,8 +94,8 @@ class DocLayout(
                 first..last
             }
             PageMode.SinglePage -> {
-                val first = (left / viewW).toInt().coerceIn(0, rects.lastIndex)
-                val last = (right / viewW).toInt().coerceIn(0, rects.lastIndex)
+                val first = (top / viewH).toInt().coerceIn(0, rects.lastIndex)
+                val last = (bottom / viewH).toInt().coerceIn(0, rects.lastIndex)
                 first..last
             }
         }
@@ -132,7 +132,7 @@ class DocLayout(
                     else -> i
                 }
             }
-            PageMode.SinglePage -> (x / viewW).toInt().coerceIn(0, rects.lastIndex)
+            PageMode.SinglePage -> (y / viewH).toInt().coerceIn(0, rects.lastIndex)
         }
     }
 }

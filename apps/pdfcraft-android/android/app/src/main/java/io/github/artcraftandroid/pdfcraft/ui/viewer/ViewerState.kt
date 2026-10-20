@@ -76,7 +76,7 @@ class ViewerState(pages: List<PageSize>) {
                     val y = (scrollY + viewH * 0.33f) / zoom
                     l.nearestPage(viewW / 2f, y)
                 }
-                PageMode.SinglePage -> l.nearestPage((scrollX + viewW / 2f) / zoom, 0f)
+                PageMode.SinglePage -> l.nearestPage(0f, (scrollY + viewH / 2f) / zoom)
             }
         }
 
@@ -96,7 +96,7 @@ class ViewerState(pages: List<PageSize>) {
             val r = layout.rects[anchorPage]
             when (mode) {
                 PageMode.Continuous -> { scrollY = (r.top + within * r.height) * zoom; scrollX = scrollX }
-                PageMode.SinglePage -> { zoom = 1f; scrollX = anchorPage * viewW; scrollY = 0f }
+                PageMode.SinglePage -> { zoom = 1f; scrollX = 0f; scrollY = anchorPage * viewH }
             }
         }
         clamp()
@@ -156,8 +156,8 @@ class ViewerState(pages: List<PageSize>) {
             }
             PageMode.SinglePage -> {
                 zoom = 1f
-                scrollX = i * viewW
-                scrollY = 0f
+                scrollX = 0f
+                scrollY = i * viewH
             }
         }
         clamp()
@@ -179,16 +179,16 @@ class ViewerState(pages: List<PageSize>) {
         clamp()
     }
 
-    /** Where single-page mode should rest after a swipe with velocity [vx] (pixels/s). */
-    fun snapTarget(vx: Float): Float {
-        val page = (scrollX / max(1f, viewW))
+    /** Vertical position where single-page mode should rest after a swipe with velocity [vy] (pixels/s). */
+    fun snapTarget(vy: Float): Float {
+        val page = (scrollY / max(1f, viewH))
         val target = when {
-            // a swipe goes to the next (or previous) page even from exactly on a page
-            vx < -SNAP_VELOCITY -> floor(page + 1e-3f) + 1f
-            vx > SNAP_VELOCITY -> ceil(page - 1e-3f) - 1f
+            // upward swipes move forward; downward swipes move backward
+            vy < -SNAP_VELOCITY -> floor(page + 1e-3f) + 1f
+            vy > SNAP_VELOCITY -> ceil(page - 1e-3f) - 1f
             else -> page.roundToInt().toFloat()
         }
-        return target.coerceIn(0f, (pages.size - 1).coerceAtLeast(0).toFloat()) * viewW
+        return target.coerceIn(0f, (pages.size - 1).coerceAtLeast(0).toFloat()) * viewH
     }
 
     fun setScroll(x: Float, y: Float) {
@@ -204,7 +204,7 @@ class ViewerState(pages: List<PageSize>) {
         val ch = l.height * zoom
         scrollX = if (cw <= viewW) -(viewW - cw) / 2f else scrollX.coerceIn(0f, cw - viewW)
         scrollY = if (ch <= viewH) -(viewH - ch) / 2f else scrollY.coerceIn(0f, ch - viewH)
-        if (mode == PageMode.SinglePage && zoom <= 1.001f) scrollY = 0f
+        if (mode == PageMode.SinglePage && zoom <= 1.001f) scrollX = 0f
     }
 
     /** Page [i]'s rectangle on screen. */
