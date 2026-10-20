@@ -10,6 +10,10 @@ name: Release
 
 on:
   push:
+    # Register and exercise this workflow in a new fork after updating this file.
+    # Normal code changes still use the manual Run workflow button.
+    branches: [main]
+    paths: ['.github/workflows/release.yml']
     tags: ['v*']
   workflow_dispatch:
 
