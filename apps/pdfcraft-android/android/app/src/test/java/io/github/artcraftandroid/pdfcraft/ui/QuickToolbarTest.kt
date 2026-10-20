@@ -18,6 +18,30 @@ class QuickToolbarTest {
     }
 
     @Test
+    fun bookmarksIsVisibleByDefault() {
+        assertEquals(QuickTool.Bookmarks, QuickTool.DEFAULT_BAR[2])
+        assertTrue(QuickTool.Export !in QuickTool.DEFAULT_BAR)
+    }
+
+    @Test
+    fun existingToolbarGainsBookmarksOnlyOnce() {
+        val original = listOf(
+            QuickTool.Edit, QuickTool.Comment, QuickTool.Highlight,
+            QuickTool.Draw, QuickTool.FillSign, QuickTool.Export,
+        )
+        val migrated = QuickToolbarPrefs.withBookmarks(original, 6)
+        assertEquals(
+            listOf(
+                QuickTool.Edit, QuickTool.Comment, QuickTool.Bookmarks,
+                QuickTool.Highlight, QuickTool.Draw, QuickTool.FillSign,
+            ),
+            migrated,
+        )
+        assertTrue(QuickTool.Export in QuickToolbarPrefs.complete(emptyList(), migrated))
+        assertEquals(migrated, QuickToolbarPrefs.withBookmarks(migrated, 6))
+    }
+
+    @Test
     fun moreToolsHoldsEveryToolNotOnTheBar() {
         val bar = listOf(QuickTool.Comment, QuickTool.Scan)
         val grid = QuickToolbarPrefs.complete(listOf(QuickTool.ReadAloud, QuickTool.Scan, QuickTool.ReadAloud), bar)

@@ -70,6 +70,7 @@ import kotlin.math.roundToInt
 enum class QuickTool(val id: String, val label: String, val title: String, val icon: ImageVector, val hue: Color, val subTools: Boolean = false) {
     Edit("edit", "Edit PDF", "Edit PDF", LucideIcons.FilePenLine, ToolHues.edit),
     Comment("comment", "Comment", "Comment", LucideIcons.MessageSquareText, ToolHues.comment, subTools = true),
+    Bookmarks("bookmarks", "Bookmarks", "Bookmarks & Table of Contents", LucideIcons.Bookmark, ToolHues.read),
     Highlight("highlight", "Highlight", "Highlight", LucideIcons.Highlighter, ToolHues.text, subTools = true),
     Draw("draw", "Draw", "Draw", LucideIcons.PenLine, ToolHues.sign),
     FillSign("fillsign", "Fill & Sign", "Fill & Sign", LucideIcons.Signature, ToolHues.sign, subTools = true),
@@ -87,7 +88,7 @@ enum class QuickTool(val id: String, val label: String, val title: String, val i
 
     companion object {
         /** The bar as it comes: the reference's default tools and order. */
-        val DEFAULT_BAR = listOf(Edit, Comment, Highlight, Draw, FillSign, Export)
+        val DEFAULT_BAR = listOf(Edit, Comment, Bookmarks, Highlight, Draw, FillSign)
 
         fun of(id: String): QuickTool? = entries.firstOrNull { it.id == id }
     }
@@ -105,7 +106,9 @@ fun toolbarSlots(widthDp: Int): Int = when {
 class QuickToolbarPrefs(context: Context) {
     private val prefs = context.getSharedPreferences("quick_toolbar", Context.MODE_PRIVATE)
 
-    var bar by mutableStateOf(read("bar") ?: QuickTool.DEFAULT_BAR)
+    // Existing users keep their arrangement; this one-time migration makes Bookmarks visible
+    // without forcing it back onto the toolbar if they later remove it via Customize toolbar.
+    var bar by mutableStateOf(loadBarWithBookmarks(context.resources.configuration.screenWidthDp))
         private set
 
     /** More tools' order: every tool not on the bar. */
@@ -115,6 +118,17 @@ class QuickToolbarPrefs(context: Context) {
     private fun read(key: String): List<QuickTool>? =
         prefs.getString(key, null)?.let { csv -> csv.split(',').filter { it.isNotBlank() }.mapNotNull(QuickTool::of).distinct() }
 
+    private fun loadBarWithBookmarks(widthDp: Int): List<QuickTool> {
+        val saved = read("bar") ?: return QuickTool.DEFAULT_BAR
+        if (prefs.getBoolean("bookmarks_toolbar_migrated", false)) return saved
+        val updated = withBookmarks(saved, toolbarSlots(widthDp))
+        prefs.edit()
+            .putString("bar", updated.joinToString(",") { it.id })
+            .putBoolean("bookmarks_toolbar_migrated", true)
+            .apply()
+        return updated
+    }
+
     fun save(newBar: List<QuickTool>, newGrid: List<QuickTool>) {
         bar = newBar.distinct()
         grid = complete(newGrid, bar)
@@ -122,6 +136,14 @@ class QuickToolbarPrefs(context: Context) {
     }
 
     companion object {
+        /** Insert Bookmarks after Comment, keeping the existing visible tools where possible. */
+        fun withBookmarks(bar: List<QuickTool>, slots: Int): List<QuickTool> {
+            if (QuickTool.Bookmarks in bar) return bar
+            val afterComment = bar.indexOf(QuickTool.Comment)
+            val index = if (afterComment >= 0) afterComment + 1 else minOf(2, bar.size)
+            return (bar.take(index) + QuickTool.Bookmarks + bar.drop(index)).distinct().take(slots)
+        }
+
         /** [order] without the bar's tools, followed by any tool it is missing. */
         fun complete(order: List<QuickTool>, bar: List<QuickTool>): List<QuickTool> {
             val g = order.filter { it !in bar }.distinct()
@@ -135,6 +157,7 @@ fun AppViewModel.runQuickTool(doc: OpenDocument, tool: QuickTool) {
     when (tool) {
         QuickTool.Edit -> enterTool(doc, ViewerTool.Edit)
         QuickTool.Comment -> enterTool(doc, ViewerTool.Comment)
+        QuickTool.Bookmarks -> doc.controller.sheet = ViewerSheet.Bookmarks
         QuickTool.Highlight -> enterTool(doc, ViewerTool.Markup)
         QuickTool.Draw -> enterTool(doc, ViewerTool.Draw)
         QuickTool.FillSign -> enterTool(doc, ViewerTool.FillSign)
