@@ -251,14 +251,32 @@ fun BookmarksSheet(vm: AppViewModel, doc: OpenDocument) {
             }
         } else {
             val list = vm.bookmarks.list(doc)
+            val page = doc.viewer.currentPage
+            val savedHere = vm.bookmarks.isBookmarked(doc, page)
+            // Keep the add action available even after the first bookmark has been saved.
+            // Each page has at most one bookmark; navigating to another page enables it again.
+            Row(
+                Modifier.fillMaxWidth()
+                    .clickable(enabled = !savedHere, role = Role.Button) { vm.toggleBookmark(doc) }
+                    .padding(horizontal = 20.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(if (savedHere) LucideIcons.Bookmark else LucideIcons.BookmarkPlus, null,
+                    tint = if (savedHere) c.textSecondary else c.accent, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(12.dp))
+                Text(
+                    if (savedHere) "Page ${page + 1} is already bookmarked" else "Add bookmark for page ${page + 1}",
+                    color = if (savedHere) c.textSecondary else c.accent,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+            SheetDivider(inset = 0.dp)
             if (list.isEmpty()) {
                 Column(Modifier.fillMaxWidth().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     Icon(LucideIcons.Bookmark, null, tint = c.textSecondary, modifier = Modifier.size(40.dp))
                     Spacer(Modifier.height(12.dp))
                     Text("Your bookmarks show up here.", color = c.text, fontSize = 15.sp)
-                    Spacer(Modifier.height(16.dp))
-                    Text("Add a bookmark", color = c.accent, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.clickable { vm.toggleBookmark(doc) }.padding(8.dp))
                 }
             } else {
                 LazyColumn(Modifier.weight(1f)) {
