@@ -52,10 +52,16 @@ class ViewerGeometryTest {
     fun singlePageFitsEachPageInItsOwnSlot() {
         val l = DocLayout(listOf(letter, landscape), PageMode.SinglePage, 1000f, 2000f, 20f, 0f, 0f, 0f)
         assertEquals(1000f, l.rects[0].width, 0.01f)
-        assertTrue(l.rects[1].left >= 1000f)
+        assertEquals(l.rects[0].left, l.rects[1].left, 0.01f)
         assertEquals(1000f, l.rects[1].width, 0.01f)
-        assertEquals(1000f, (l.rects[0].top + l.rects[0].bottom) - 1000f, 1f) // centred vertically in 2000
-        assertEquals(2000f, l.width, 0.01f)
+        assertEquals(1000f, (l.rects[0].top + l.rects[0].bottom) / 2f, 1f) // centred in first 2000px slot
+        assertTrue(l.rects[1].top >= 2000f)
+        assertEquals(1000f, l.width, 0.01f)
+        assertEquals(4000f, l.height, 0.01f)
+        assertEquals(0..0, l.visible(0f, 0f, 1000f, 1999f))
+        assertEquals(1..1, l.visible(0f, 2000f, 1000f, 3999f))
+        assertEquals(1, l.nearestPage(500f, 2500f))
+        assertEquals(1, l.pageAt(500f, l.rects[1].top + 10f))
     }
 
     @Test
@@ -172,13 +178,31 @@ class ViewerGeometryTest {
     }
 
     @Test
+    fun verticalSinglePageDragIgnoresHorizontalMovementAndSurvivesResize() {
+        val s = state(List(8) { letter })
+        s.switchMode(PageMode.SinglePage)
+        s.scrollBy(-800f, -1200f)
+        assertEquals(0f, s.scrollX, 0.01f)
+        assertEquals(1200f, s.scrollY, 0.01f)
+        assertEquals(1, s.currentPage)
+        assertEquals(2000f, s.snapTarget(0f), 0.01f)
+        s.goToPage(3)
+        s.setViewport(1000f, 1600f)
+        assertEquals(3, s.currentPage)
+        assertEquals(0f, s.scrollX, 0.01f)
+        assertEquals(4800f, s.scrollY, 0.01f)
+    }
+
+    @Test
     fun switchingToSinglePageKeepsThePage() {
         val s = state(List(8) { letter })
         s.goToPage(5)
         s.switchMode(PageMode.SinglePage)
         assertEquals(5, s.currentPage)
-        assertEquals(5 * 1080f, s.scrollX, 0.5f)
-        assertEquals(6 * 1080f, s.snapTarget(-2000f), 0.5f)
-        assertEquals(5 * 1080f, s.snapTarget(0f), 0.5f)
+        assertEquals(0f, s.scrollX, 0.5f)
+        assertEquals(5 * 2000f, s.scrollY, 0.5f)
+        assertEquals(6 * 2000f, s.snapTarget(-2000f), 0.5f)
+        assertEquals(4 * 2000f, s.snapTarget(2000f), 0.5f)
+        assertEquals(5 * 2000f, s.snapTarget(0f), 0.5f)
     }
 }

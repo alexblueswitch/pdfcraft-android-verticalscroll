@@ -181,9 +181,9 @@ fun PageCanvas(
 /** After a gesture: fling (with decay), or in single-page mode come to rest on a page. */
 private suspend fun settle(state: ViewerState, velocity: Offset, density: Float) {
     if (state.mode == PageMode.SinglePage && state.zoom <= 1.01f) {
-        val target = state.snapTarget(velocity.x)
-        val anim = Animatable(state.scrollX)
-        anim.animateTo(target, spring(stiffness = 600f), initialVelocity = -velocity.x) { state.setScroll(value, 0f) }
+        val target = state.snapTarget(velocity.y)
+        val anim = Animatable(state.scrollY)
+        anim.animateTo(target, spring(stiffness = 600f), initialVelocity = -velocity.y) { state.setScroll(0f, value) }
         return
     }
     if (velocity.getDistance() < 50f) return
