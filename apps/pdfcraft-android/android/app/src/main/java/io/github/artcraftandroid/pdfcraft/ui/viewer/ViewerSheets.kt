@@ -182,8 +182,8 @@ fun BookmarksSheet(vm: AppViewModel, doc: OpenDocument) {
     val ctl = doc.controller
     var outline by remember { mutableStateOf<List<OutlineEntry>?>(null) }
     LaunchedEffect(doc.info.generation) { outline = vm.outline(doc) }
-    val hasOutline = doc.info.hasOutline
-    var tab by remember { mutableStateOf(if (hasOutline) 0 else 1) }
+    // Open the user's saved bookmarks first; Contents remains available as the other tab.
+    var tab by remember { mutableStateOf(1) }
     // the outline level shown: the index of its parent entry (-1: the top level)
     var parent by remember { mutableStateOf(-1) }
     var renaming by remember { mutableStateOf<Int?>(null) }
